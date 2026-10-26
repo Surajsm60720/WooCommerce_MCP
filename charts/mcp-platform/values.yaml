@@ -1,0 +1,149 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+namespace: mcp-platform
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    store: store.local
+    dashboard: dashboard.local
+    gateway: gateway.local
+  tls: []
+
+storageClassName: ""
+
+images:
+  wordpress: wordpress:6.7-php8.2-apache
+  wordpressCli: wordpress:cli-php8.2
+  mariadb: mariadb:11.4
+  postgres: postgres:16-alpine
+  gateway: mcp-platform/gateway:local
+  dashboard: mcp-platform/dashboard:local
+  woocommerceMcp: mcp-platform/woocommerce-mcp:local
+  timeMcp: mcp-platform/time-mcp:local
+  notesMcp: mcp-platform/notes-mcp:local
+
+# Credential material lives in secrets.example.yaml / secrets.local.yaml /
+# secrets.prod.yaml (or --set). Do not put real passwords here.
+secrets:
+  mysqlRootPassword: ""
+  mysqlPassword: ""
+  mysqlDatabase: wordpress
+  mysqlUser: wordpress
+  wordpressAdminUser: admin
+  wordpressAdminPassword: ""
+  wordpressAdminEmail: admin@store.local
+  wooConsumerKey: ""
+  wooConsumerSecret: ""
+  gatewayDbPassword: ""
+  jwtSecret: ""
+  groqApiKey: ""
+  seedAdminPassword: ""
+  seedMemberPassword: ""
+
+mariadb:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+wordpress:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+gatewayDb:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+gateway:
+  replicas: 1
+  publicUrl: http://gateway.local
+  groqModel: openai/gpt-oss-20b
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+dashboard:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+woocommerceMcp:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+timeMcp:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+notesMcp:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+wordpressBootstrap:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+networkPolicies:
+  enabled: true
+  # Namespaces allowed to reach Ingress-backed pods (store/dashboard/gateway).
+  # Kind: ingress-nginx. k3s Traefik: usually kube-system (override in values-prod).
+  ingressNamespaces:
+    - ingress-nginx
+
+multiStore:
+  enabled: true
+  maxStoresPerUser: 3
+  provisionTimeoutMs: 900000
+  hostSuffix: .local

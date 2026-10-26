@@ -1,0 +1,190 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wordpress-bootstrap
+  labels:
+    {{- include "mcp-platform.labels" . | nindent 4 }}
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    set -eu
+    export WP_CLI_ALLOW_ROOT=1
+    cd /var/www/html
+    mkdir -p wp-content/upgrade wp-content/plugins wp-content/uploads
+    chown -R www-data:www-data wp-content || true
+    chmod -R ug+rwX wp-content || true
+
+    echo "Waiting for wp-config.php..."
+    i=0
+    while [ ! -f wp-config.php ]; do
+      i=$((i+1))
+      if [ "$i" -gt 60 ]; then
+        echo "Timeout waiting for wp-config.php"
+        exit 1
+      fi
+      sleep 5
+    done
+
+    if ! wp core is-installed; then
+      echo "Installing WordPress..."
+      wp core install \
+        --url="http://{{ .Values.ingress.hosts.store }}" \
+        --title="Demo Store" \
+        --admin_user="$WORDPRESS_ADMIN_USER" \
+        --admin_password="$WORDPRESS_ADMIN_PASSWORD" \
+        --admin_email="$WORDPRESS_ADMIN_EMAIL" \
+        --skip-email
+    fi
+
+    echo "Ensuring WooCommerce (pinned for WordPress 6.7)..."
+    if ! wp plugin is-installed woocommerce; then
+      wp plugin install woocommerce --version=9.6.2 --activate
+    else
+      wp plugin activate woocommerce || true
+    fi
+
+    wp option update woocommerce_store_address "1 Demo Street"
+    wp option update woocommerce_store_city "Demo City"
+    wp option update woocommerce_default_country "US:CA"
+    wp option update woocommerce_currency "USD"
+    wp option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery.","enable_for_methods":[],"enable_for_virtual":"yes"}' --format=json || true
+    # WooCommerce 9.x defaults to "coming soon" which hides the real shopfront
+    wp option update woocommerce_coming_soon no || true
+    wp option update woocommerce_store_pages_only no || true
+    wp wc tool run install_pages --user=1 || true
+
+    echo "Ensuring REST API key..."
+    wp eval '
+      global $wpdb;
+      $key = getenv("WOO_CONSUMER_KEY");
+      $secret = getenv("WOO_CONSUMER_SECRET");
+      if (!$key || !$secret) { echo "missing key env\n"; exit(1); }
+      $table = $wpdb->prefix . "woocommerce_api_keys";
+      $exists = $wpdb->get_var($wpdb->prepare("SELECT key_id FROM {$table} WHERE truncated_key = %s", substr($key, -7)));
+      if (!$exists) {
+        $wpdb->insert($table, array(
+          "user_id" => 1,
+          "description" => "MCP Gateway",
+          "permissions" => "read_write",
+          "consumer_key" => wc_api_hash($key),
+          "consumer_secret" => $secret,
+          "truncated_key" => substr($key, -7),
+        ));
+        echo "API key inserted\n";
+      } else {
+        echo "API key already present\n";
+      }
+    '
+
+    COUNT=$(wp post list --post_type=product --format=count)
+    if [ "$COUNT" = "0" ]; then
+      wp wc product create --name="Starter Mug" --regular_price=12.00 --user=1 || true
+    fi
+
+    # Allow WooCommerce REST Basic Auth over HTTP (MCP talks to http://wordpress in-cluster)
+    mkdir -p wp-content/mu-plugins
+    cat > wp-content/mu-plugins/wc-allow-http-basic-auth.php <<'PHP'
+    <?php
+    /**
+     * Plugin Name: WC Allow HTTP Basic Auth (lab)
+     * Description: Allows WooCommerce REST API Basic Auth without HTTPS for in-cluster demos.
+     */
+    add_filter('woocommerce_api_is_ssl', '__return_true');
+    add_action('init', function () {
+      if (!empty($_SERVER['HTTP_AUTHORIZATION']) || !empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION']) || !empty($_GET['consumer_key'])) {
+        $_SERVER['HTTPS'] = 'on';
+      }
+    }, 0);
+    PHP
+    chown -R www-data:www-data wp-content/mu-plugins || true
+
+    echo "Bootstrap complete"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wordpress-bootstrap
+  labels:
+    {{- include "mcp-platform.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 8
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: wordpress-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      # Needs root to chown the shared WordPress PVC before wp-cli (www-data) installs plugins
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: bootstrap
+          image: {{ .Values.images.wordpressCli }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            runAsUser: 0
+          command: ["sh", "/scripts/bootstrap.sh"]
+          resources:
+            {{- toYaml .Values.wordpressBootstrap.resources | nindent 12 }}
+          env:
+            # wp-config.php resolves DB_* via getenv at runtime — must match the WordPress pod
+            - name: WORDPRESS_DB_HOST
+              value: mariadb
+            - name: WORDPRESS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: mysql-user
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: mysql-password
+            - name: WORDPRESS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: mysql-database
+            - name: WORDPRESS_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: wordpress-admin-user
+            - name: WORDPRESS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: wordpress-admin-password
+            - name: WORDPRESS_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: wordpress-admin-email
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: woo-consumer-key
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: woo-consumer-secret
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/html
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: wordpress-data
+        - name: scripts
+          configMap:
+            name: wordpress-bootstrap
+            defaultMode: 0755

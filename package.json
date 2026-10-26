@@ -1,0 +1,18 @@
+{
+  "name": "woocommerce-mcp-platform",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:gateway": "npm run dev -w @platform/gateway",
+    "dev:dashboard": "npm run dev -w @platform/dashboard",
+    "dev:woo-mcp": "npm run dev -w @platform/woocommerce-mcp",
+    "dev:time-mcp": "npm run dev -w @platform/time-mcp",
+    "dev:notes-mcp": "npm run dev -w @platform/notes-mcp"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

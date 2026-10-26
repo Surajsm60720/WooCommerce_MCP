@@ -1,0 +1,54 @@
+# Production-like (k3s) overlays — same chart as values-local.yaml.
+# Diff vs local: real DNS hosts, Traefik ingress class, local-path storage,
+# registry images, IfNotPresent pull policy, HTTPS publicUrl.
+# Install:
+#   helm upgrade --install mcp-platform ./charts/mcp-platform \
+#     -n mcp-platform --create-namespace \
+#     -f charts/mcp-platform/values.yaml \
+#     -f charts/mcp-platform/values-prod.yaml \
+#     -f secrets.prod.yaml
+# Rollback: helm rollback mcp-platform <revision> -n mcp-platform
+
+ingress:
+  className: traefik
+  hosts:
+    store: store.example.com
+    dashboard: dashboard.example.com
+    gateway: gateway.example.com
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+  # Optional TLS with cert-manager:
+  # tls:
+  #   - secretName: mcp-platform-tls
+  #     hosts:
+  #       - store.example.com
+  #       - dashboard.example.com
+  #       - gateway.example.com
+
+storageClassName: local-path
+
+gateway:
+  publicUrl: https://gateway.example.com
+  replicas: 1
+
+global:
+  imagePullPolicy: IfNotPresent
+
+# Point these at your registry after building/pushing
+images:
+  gateway: ghcr.io/example/mcp-gateway:0.1.0
+  dashboard: ghcr.io/example/mcp-dashboard:0.1.0
+  woocommerceMcp: ghcr.io/example/woocommerce-mcp:0.1.0
+  timeMcp: ghcr.io/example/time-mcp:0.1.0
+  notesMcp: ghcr.io/example/notes-mcp:0.1.0
+
+# Traefik on k3s typically runs in kube-system; allow it through NetworkPolicies.
+networkPolicies:
+  enabled: true
+  ingressNamespaces:
+    - kube-system
+    - traefik
+
+# Provide real secrets via: helm upgrade --install ... -f values-prod.yaml -f secrets.prod.yaml
+# secrets.prod.yaml should set secrets.groqApiKey, WP admin password, DB passwords, JWT secret.
+# Do not commit secrets.prod.yaml.

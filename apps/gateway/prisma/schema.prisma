@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  member
+}
+
+enum ServerStatus {
+  connected
+  unreachable
+  disabled
+}
+
+enum StoreStatus {
+  provisioning
+  ready
+  failed
+  deleting
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         Role      @default(member)
+  createdAt    DateTime  @default(now())
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+  stores       Store[]
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  prefix    String
+  keyHash   String
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([prefix])
+}
+
+model McpServer {
+  id                 String       @id @default(cuid())
+  name               String
+  slug               String       @unique
+  url                String
+  credentialType     String       @default("none") // none | bearer | header
+  credentialHeader   String?
+  credentialValue    String?
+  enabled            Boolean      @default(true)
+  status             ServerStatus @default(unreachable)
+  lastError          String?
+  lastCheckedAt      DateTime?
+  toolsJson          String       @default("[]")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  auditLogs          AuditLog[]
+  store              Store?
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  serverId     String?
+  server       McpServer? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  toolName     String
+  success      Boolean
+  errorMessage String?
+  durationMs   Int
+  createdAt    DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model Store {
+  id           String      @id @default(cuid())
+  name         String
+  slug         String      @unique
+  namespace    String      @unique
+  host         String
+  status       StoreStatus @default(provisioning)
+  statusReason String?
+  mcpServerId  String?     @unique
+  mcpServer    McpServer?  @relation(fields: [mcpServerId], references: [id], onDelete: SetNull)
+  createdById  String
+  createdBy    User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([createdById])
+  @@index([status])
+}

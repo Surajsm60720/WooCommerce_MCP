@@ -1,0 +1,23 @@
+ingress:
+  className: nginx
+  hosts:
+    store: store.local
+    dashboard: dashboard.local
+    gateway: gateway.local
+
+storageClassName: standard
+
+gateway:
+  publicUrl: http://gateway.local
+
+images:
+  gateway: mcp-platform/gateway:local
+  dashboard: mcp-platform/dashboard:local
+  woocommerceMcp: mcp-platform/woocommerce-mcp:local
+  timeMcp: mcp-platform/time-mcp:local
+  notesMcp: mcp-platform/notes-mcp:local
+
+# IfNotPresent: Kind can pull public base images; local mcp-platform/* images
+# are still used after `kind load docker-image` (see scripts/kind-up.sh).
+global:
+  imagePullPolicy: IfNotPresent

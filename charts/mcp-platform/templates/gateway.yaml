@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    {{- include "mcp-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: gateway
+    spec:
+      {{- if .Values.multiStore.enabled }}
+      serviceAccountName: gateway
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: gateway
+          image: {{ .Values.images.gateway }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: database-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: jwt-secret
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: groq-api-key
+            - name: GROQ_MODEL
+              value: {{ .Values.gateway.groqModel | default "openai/gpt-oss-20b" | quote }}
+            - name: PUBLIC_GATEWAY_URL
+              value: {{ .Values.gateway.publicUrl | quote }}
+            - name: SEED_ADMIN_EMAIL
+              value: ava@demo.local
+            - name: SEED_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: seed-admin-password
+            - name: SEED_MEMBER_EMAIL
+              value: ben@demo.local
+            - name: SEED_MEMBER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secrets
+                  key: seed-member-password
+            - name: SEED_WOO_MCP_URL
+              value: http://woocommerce-mcp:3101/mcp
+            - name: SEED_TIME_MCP_URL
+              value: http://time-mcp:3102/mcp
+            - name: SEED_NOTES_MCP_URL
+              value: http://notes-mcp:3103/mcp
+            - name: MULTI_STORE_ENABLED
+              value: {{ .Values.multiStore.enabled | quote }}
+            - name: MAX_STORES_PER_USER
+              value: {{ .Values.multiStore.maxStoresPerUser | quote }}
+            - name: STORE_PROVISION_TIMEOUT_MS
+              value: {{ .Values.multiStore.provisionTimeoutMs | quote }}
+            - name: PLATFORM_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: STORE_HOST_SUFFIX
+              value: {{ .Values.multiStore.hostSuffix | quote }}
+            - name: INGRESS_CLASS_NAME
+              value: {{ .Values.ingress.className | quote }}
+            - name: INGRESS_NAMESPACE
+              value: {{ index .Values.networkPolicies.ingressNamespaces 0 | default "ingress-nginx" | quote }}
+            - name: STORAGE_CLASS_NAME
+              value: {{ .Values.storageClassName | default "" | quote }}
+            - name: IMAGE_WORDPRESS
+              value: {{ .Values.images.wordpress | quote }}
+            - name: IMAGE_WORDPRESS_CLI
+              value: {{ .Values.images.wordpressCli | quote }}
+            - name: IMAGE_MARIADB
+              value: {{ .Values.images.mariadb | quote }}
+            - name: IMAGE_WOOCOMMERCE_MCP
+              value: {{ .Values.images.woocommerceMcp | quote }}
+            - name: IMAGE_PULL_POLICY
+              value: {{ .Values.global.imagePullPolicy | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    {{- include "mcp-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  selector:
+    app.kubernetes.io/component: gateway
+  ports:
+    - port: 3000
+      targetPort: 3000
